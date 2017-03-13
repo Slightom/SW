@@ -1,0 +1,103 @@
+#include "stm32f10x.h"
+void GPIO_Config(void);
+void RCC_Config(void);
+#define SysTick_Frequency 9000000 // 9MHz 
+
+
+uint16_t int27seg(uint8_t);
+
+
+
+int main(void)
+{	
+	uint8_t i=0;
+	volatile unsigned long int j;
+	//konfiguracja systemu
+	RCC_Config();
+	GPIO_Config();
+	GPIO_Write(GPIOB, int27seg(9));
+	while (1)
+	{
+		for(j = 0; j <  0x640000ul; j++);	
+		GPIO_Write(GPIOB, int27seg((i++)%16));
+	};
+	return 0;
+}
+
+// konwersja na kod wyswietlacza 7-segmentowego
+uint16_t int27seg(uint8_t cyfra)
+{
+	uint16_t result;
+	switch (cyfra){
+		case 0:  result=0xC0; break; // 11000000
+		case 1:  result=0xF9; break; // 11111001
+		case 2:  result=0xA4; break; // 10100100
+		case 3:  result=0xB0; break; // 10110000
+		case 4:  result=0x99; break; // 10011001
+		case 5:  result=0x92; break; // 10010010
+		case 6:  result=0x82; break; // 10000010
+		case 7:  result=0xF8; break; // 11111000
+		case 8:  result=0x80; break; // 10000000
+		case 9:  result=0x90; break; // 10010000
+		case 10: result=0x88; break; // 10001000
+		case 11: result=0x83; break; // 10010000
+		case 12: result=0xC6; break; // 10010000
+		case 13: result=0xA1; break; // 10010000
+		case 14: result=0x86; break; // pozmienuiac komentarze!!!!!
+		case 15: result=0x8E; break; // 
+		default: result=0xFF; break; // 11111111 - nic do wyswietlenia
+	}
+
+	return result;
+}
+
+
+void RCC_Config(void)
+//konfigurowanie sygnalow taktujacych
+{
+  ErrorStatus HSEStartUpStatus;                          //zmienna opisujaca rezultat uruchomienia HSE
+
+  RCC_DeInit();                                          //Reset ustawien RCC
+	RCC_APB2PeriphClockCmd(RCC_APB2Periph_GPIOB | RCC_APB2Periph_AFIO, ENABLE);
+  RCC_HSEConfig(RCC_HSE_ON);                             //Wlaczenie HSE
+  HSEStartUpStatus = RCC_WaitForHSEStartUp();            //Odczekaj az HSE bedzie gotowy
+  if(HSEStartUpStatus == SUCCESS)
+  {
+    FLASH_PrefetchBufferCmd(FLASH_PrefetchBuffer_Enable);//
+    FLASH_SetLatency(FLASH_Latency_2);                   //ustaw zwloke dla pamieci Flash; zaleznie od taktowania rdzenia
+                                                         //0:<24MHz; 1:24~48MHz; 2:>48MHz
+    RCC_HCLKConfig(RCC_SYSCLK_Div1);                     //ustaw HCLK=SYSCLK
+    RCC_PCLK2Config(RCC_HCLK_Div1);                      //ustaw PCLK2=HCLK
+    RCC_PCLK1Config(RCC_HCLK_Div2);                      //ustaw PCLK1=HCLK/2
+    RCC_PLLConfig(RCC_PLLSource_HSE_Div1, RCC_PLLMul_9); //ustaw PLLCLK = HSE*9 czyli 8MHz * 9 = 72 MHz
+    RCC_PLLCmd(ENABLE);                                  //wlacz PLL
+    while(RCC_GetFlagStatus(RCC_FLAG_PLLRDY) == RESET);  //odczekaj na poprawne uruchomienie PLL
+    RCC_SYSCLKConfig(RCC_SYSCLKSource_PLLCLK);           //ustaw PLL jako zrodlo sygnalu zegarowego
+    while(RCC_GetSYSCLKSource() != 0x08);                //odczekaj az PLL bedzie sygnalem zegarowym systemu
+  
+  /*Tu nalezy umiescic kod zwiazany z konfiguracja sygnalow zegarowych potrzebnych w programie peryferiow*/
+    RCC_APB2PeriphClockCmd(RCC_APB2Periph_GPIOA | RCC_APB2Periph_GPIOB, ENABLE);//wlacz taktowanie portu GPIO A
+	
+  } else {
+  } 
+}
+
+
+
+void GPIO_Config(void)
+{
+  //konfigurowanie portow GPIO
+  GPIO_InitTypeDef  GPIO_InitStructure; 
+GPIO_PinRemapConfig(GPIO_Remap_SWJ_JTAGDisable, ENABLE);
+  /*Tu nalezy umiescic kod zwiazany z konfiguracja poszczegolnych portow GPIO potrzebnych w programie*/
+  GPIO_InitStructure.GPIO_Pin = GPIO_Pin_0 | GPIO_Pin_1 | GPIO_Pin_2 | GPIO_Pin_3 | GPIO_Pin_4 | GPIO_Pin_5 | GPIO_Pin_6 | GPIO_Pin_7;
+  GPIO_InitStructure.GPIO_Speed = GPIO_Speed_50MHz;
+  GPIO_InitStructure.GPIO_Mode = GPIO_Mode_Out_PP;      //wyjscie push-pull
+  GPIO_Init(GPIOB, &GPIO_InitStructure);
+
+  GPIO_InitStructure.GPIO_Pin = GPIO_Pin_0 | GPIO_Pin_1 | GPIO_Pin_2 | GPIO_Pin_3;
+  GPIO_InitStructure.GPIO_Speed = GPIO_Speed_50MHz;
+  GPIO_InitStructure.GPIO_Mode = GPIO_Mode_IN_FLOATING;      //wejscie bez podciagania
+  GPIO_Init(GPIOA, &GPIO_InitStructure);
+
+}

@@ -1,0 +1,210 @@
+#include "stm32f10x.h"
+
+typedef int bool;
+#define true 1
+#define false 0
+
+void GPIO_Config(void);
+void RCC_Config(void);
+
+void wait(unsigned long int* p, uint8_t* port_data, uint8_t* temp, uint8_t* button_state, int* direction, int tab[], int* lewyKoniec, int* dl, bool* permisison);
+void setAllLigts(int tab[8]);
+void setTable(int tab[8], int d, int dl, int* lewyKoniec);
+
+
+int main(void)
+{
+  volatile unsigned long int i;
+	int direction=1;       // 0-w lewo, 1-w prawo 
+	volatile unsigned long int p = 0x40000ul; 
+	uint8_t button_state=0xFF, temp=0, port_data ;
+	int lewyKoniec=3; // lewy poczatek pociagu
+	int dl=4;   // dlugosc pociagu
+	bool permission=true;
+	
+	int tab [8];
+	for(i=0; i<8; i++)
+	{
+		tab[i] = 0;
+	}
+	tab[3]=1;
+	tab[2]=1;
+	tab[1]=1;
+	tab[0]=1;
+	
+  //konfiguracja systemu
+  RCC_Config();   
+  GPIO_Config(); 
+  GPIO_ResetBits(GPIOA, GPIO_Pin_0 | GPIO_Pin_1 | GPIO_Pin_2 | GPIO_Pin_3 | GPIO_Pin_4 | GPIO_Pin_5 | GPIO_Pin_6 | GPIO_Pin_7 );		 
+  GPIO_ResetBits(GPIOB, GPIO_Pin_0 | GPIO_Pin_1 | GPIO_Pin_2 | GPIO_Pin_3 | GPIO_Pin_4 | GPIO_Pin_5 | GPIO_Pin_6 | GPIO_Pin_7);		 
+  
+		
+	while (1) 
+	{
+		port_data = GPIO_ReadInputData(GPIOA); //czytaj port GPIOA
+		temp = port_data ^ button_state; // czy stan przycisków sie zmienil?
+		temp &= button_state; // czy to byla zmiana z 1 na 0?
+		button_state = port_data; // zapamietaj nowy stan	
+				
+		permission=true;		
+		setTable(tab, direction, dl, &lewyKoniec); // ustal tablice 
+		setAllLigts(tab); // zapal jedynki
+		wait(&p, &port_data, &temp, &button_state, &direction, tab, &lewyKoniec, &dl, &permission);
+  };
+	
+	
+	
+  return 0;
+}
+
+
+void wait(unsigned long int* p, uint8_t* port_data, uint8_t* temp, uint8_t* button_state, int* direction, int tab[], int* lewyKoniec, int* dl, bool* permisison)
+{
+	int i, j;
+	for(i=0; i<(*p); i++)
+	{
+		(*port_data) = GPIO_ReadInputData(GPIOA); //czytaj port GPIOA
+		(*temp) = (*port_data) ^ (*button_state); // czy stan przycisków sie zmienil?
+		(*temp) &= (*button_state); // czy to byla zmiana z 1 na 0?
+		(*button_state) = (*port_data); // zapamietaj nowy stan
+		if((*temp) != 0)
+		{
+			if((*temp) & 0x20) { (*p)/=1.2; }
+			else
+			if((*temp) & 0x40) { (*p)*=1.2; }
+			else
+			if((((*direction)==1) && ((*temp) & 0x10))) { (*direction)=0; }
+			else
+			if((((*direction)==0) && ((*temp) & 0x80))) { (*direction)=1; }		
+			else
+			if(((*temp) & 0x01) && (*permisison)==true) // SW0, zmniejszamy
+			{
+				//for(j = 0; j < (*p); j++);	 
+				if((*dl)>1)
+				{
+					if((*direction) == 0)
+					{
+						tab[((*lewyKoniec)-(*dl)+1+8)%8] = 0;
+						(*dl) -= 1;
+					}
+					else
+					{
+						tab[(*lewyKoniec)] = 0;
+						(*lewyKoniec) = ((*lewyKoniec)-1+8)%8; // +8 bo w C nie liczy modulo z ujemnych
+						(*dl) -= 1;
+					}					
+					(*permisison)=false;
+				}
+			}
+			else
+			if(((*temp) & 0x02) && (*permisison)==true) // SW1, zwiekszamy
+			{
+				//+for(j = 0; j < (*p); j++);	 
+				if((*dl)<7)
+				{
+					if((*direction) == 0)
+					{
+						tab[((*lewyKoniec)-(*dl)+1+8)%8] = 1;
+						(*dl) += 1;
+					}
+					else
+					{
+						(*lewyKoniec) = ((*lewyKoniec)+1)%8; // +8 bo w C nie liczy modulo z ujemnych
+						tab[(*lewyKoniec)] = 1;
+						(*dl) += 1;
+					}
+					
+					(*permisison)=false;
+				}
+			}
+		}
+	}
+}
+
+
+void setAllLigts(int tab[8])
+{
+	GPIO_WriteBit(GPIOB, GPIO_Pin_0, tab[0]==1 ? Bit_SET : Bit_RESET);	
+	GPIO_WriteBit(GPIOB, GPIO_Pin_1, tab[1]==1 ? Bit_SET : Bit_RESET);	
+	GPIO_WriteBit(GPIOB, GPIO_Pin_2, tab[2]==1 ? Bit_SET : Bit_RESET);	
+	GPIO_WriteBit(GPIOB, GPIO_Pin_3, tab[3]==1 ? Bit_SET : Bit_RESET);	
+	GPIO_WriteBit(GPIOB, GPIO_Pin_4, tab[4]==1 ? Bit_SET : Bit_RESET);	
+	GPIO_WriteBit(GPIOB, GPIO_Pin_5, tab[5]==1 ? Bit_SET : Bit_RESET);	
+	GPIO_WriteBit(GPIOB, GPIO_Pin_6, tab[6]==1 ? Bit_SET : Bit_RESET);	
+	GPIO_WriteBit(GPIOB, GPIO_Pin_7, tab[7]==1 ? Bit_SET : Bit_RESET);	
+}
+
+
+void setTable(int tab[8], int d, int dl, int* lewyKoniec)
+{
+	
+	if(d == 0) // jesli w lewo
+	{
+		tab[((*lewyKoniec)-(dl-1)+8)%8] = 0; // zerujemy prawy koniec ; +8 bo w C nie liczy modulo z ujemnych
+		(*lewyKoniec) = ((*lewyKoniec)+1)%8; // ustalamy nowy lewy koniec
+		tab[(*lewyKoniec)] = 1;              // wstawiamy 1 z lewej strony
+	}	
+	else // jesli w prawo
+	{
+		tab[(*lewyKoniec)] = 0;                // zerujemy lewy koniec
+		(*lewyKoniec) = ((*lewyKoniec)-1+8)%8; // ustalamy nowy lewy koniec ; +8 bo w C nie liczy modulo z ujemnych
+		tab[((*lewyKoniec)-(dl-1)+8)%8] = 1;   // wstawiamy 1 z lewej strony ; +8 bo w C nie liczy modulo z ujemnych
+	}
+	
+}
+
+
+
+
+
+
+//konfigurowanie sygnalow taktujacych ////////////////////////////////////////////////////////////////////////////
+void RCC_Config(void)
+{
+  ErrorStatus HSEStartUpStatus;                          //zmienna opisujaca rezultat uruchomienia HSE
+
+  RCC_DeInit();                                          //Reset ustawien RCC
+	RCC_APB2PeriphClockCmd(RCC_APB2Periph_GPIOB | RCC_APB2Periph_AFIO, ENABLE);
+  RCC_HSEConfig(RCC_HSE_ON);                             //Wlaczenie HSE
+  HSEStartUpStatus = RCC_WaitForHSEStartUp();            //Odczekaj az HSE bedzie gotowy
+  if(HSEStartUpStatus == SUCCESS)
+  {
+    FLASH_PrefetchBufferCmd(FLASH_PrefetchBuffer_Enable);//
+    FLASH_SetLatency(FLASH_Latency_2);                   //ustaw zwloke dla pamieci Flash; zaleznie od taktowania rdzenia
+                                                         //0:<24MHz; 1:24~48MHz; 2:>48MHz
+    RCC_HCLKConfig(RCC_SYSCLK_Div1);                     //ustaw HCLK=SYSCLK
+    RCC_PCLK2Config(RCC_HCLK_Div1);                      //ustaw PCLK2=HCLK
+    RCC_PCLK1Config(RCC_HCLK_Div2);                      //ustaw PCLK1=HCLK/2
+    RCC_PLLConfig(RCC_PLLSource_HSE_Div1, RCC_PLLMul_9); //ustaw PLLCLK = HSE*9 czyli 8MHz * 9 = 72 MHz
+    RCC_PLLCmd(ENABLE);                                  //wlacz PLL
+    while(RCC_GetFlagStatus(RCC_FLAG_PLLRDY) == RESET);  //odczekaj na poprawne uruchomienie PLL
+    RCC_SYSCLKConfig(RCC_SYSCLKSource_PLLCLK);           //ustaw PLL jako zrodlo sygnalu zegarowego
+    while(RCC_GetSYSCLKSource() != 0x08);                //odczekaj az PLL bedzie sygnalem zegarowym systemu
+  
+  /*Tu nalezy umiescic kod zwiazany z konfiguracja sygnalow zegarowych potrzebnych w programie peryferiow*/
+    RCC_APB2PeriphClockCmd(RCC_APB2Periph_GPIOA | RCC_APB2Periph_GPIOB, ENABLE);//wlacz taktowanie portu GPIO A
+	
+  } else {
+  } 
+}
+
+
+
+void GPIO_Config(void)
+{
+  //konfigurowanie portow GPIO
+  GPIO_InitTypeDef  GPIO_InitStructure; 
+GPIO_PinRemapConfig(GPIO_Remap_SWJ_JTAGDisable, ENABLE);
+  /*Tu nalezy umiescic kod zwiazany z konfiguracja poszczegolnych portow GPIO potrzebnych w programie*/
+  GPIO_InitStructure.GPIO_Pin = GPIO_Pin_0 | GPIO_Pin_1 | GPIO_Pin_2 | GPIO_Pin_3 | GPIO_Pin_4 | GPIO_Pin_5 | GPIO_Pin_6 | GPIO_Pin_7;
+  GPIO_InitStructure.GPIO_Speed = GPIO_Speed_50MHz;
+  GPIO_InitStructure.GPIO_Mode = GPIO_Mode_Out_PP;      //wyjscie push-pull
+  GPIO_Init(GPIOB, &GPIO_InitStructure);
+
+  GPIO_InitStructure.GPIO_Pin = GPIO_Pin_0 | GPIO_Pin_1 | GPIO_Pin_2 | GPIO_Pin_3;
+  GPIO_InitStructure.GPIO_Speed = GPIO_Speed_50MHz;
+  GPIO_InitStructure.GPIO_Mode = GPIO_Mode_IN_FLOATING;      //wejscie bez podciagania
+  GPIO_Init(GPIOA, &GPIO_InitStructure);
+
+}
+
