@@ -1,40 +1,135 @@
 #include "stm32f10x.h"
-
 #define SysTick_Frequency 9000000
 
 
 void GPIO_Config(void);
 void RCC_Config(void);
-uint16_t int27seg(uint8_t);
+uint16_t intTo7seg(uint8_t);                // konwersja na kod wyswietlacza 7-segmentowego
+void Delay (uint32_t ms);                   // powoduje wywolywanie przerwania z czestotliwoscia okreslona w parametrze
+void step();                                // wykonuje sie w kazdym przerwaniu
+void displayDigitOnNextDisplay(uint8_t x);  // wyswietla cyfre na jednym wyswietlaczu, pozostale gasi
 
 
-//static uint32_t delayTime;
+uint8_t  displayNumber = 0;           // numer wyswietlacza ktory ma byc aktualnie zapalony 0..3
+uint32_t interruptCounter = 0;        // zlicza przerwania 0..changeDigitTime/interruptTime
+uint8_t  digitNumber = 0;             // numer wyswietlanej cyfry 0..15
+uint32_t changeDigitTime = 1000;      // co ile ms ma zmienic sie wyswietlana cyfra
+uint32_t interruptfrequency = 5;      // co ile ms ma sie wywolac przerwanie
 
 
 
 int main(void)
 {	
-  //konfiguracja systemu
-  RCC_Config();   
-  GPIO_Config(); 
-  /*Tu nalezy umiescic ewentualne dalsze funkcje konfigurujace system*/
-	
-	
-	if(SysTick_Config((SysTick_Frequency / 1000)*500))
-	{
-		while(1);
-	}
-	SysTick_CLKSourceConfig(SysTick_CLKSource_HCLK_Div8);		
+	//konfiguracja systemu
+	RCC_Config();   
+	GPIO_Config(); 
+  
+	Delay(interruptfrequency);
 	
 	while (1) 
 	{
     };
 		
-  return 0;
 }
 
 
 
+	
+	
+void step()
+{
+	displayDigitOnNextDisplay(displayNumber++);
+	
+	if(displayNumber == 4) { displayNumber=0; };
+	if(interruptCounter++ == changeDigitTime/interruptfrequency)
+	{
+		interruptCounter = 0;
+		if(digitNumber++ == 15) { digitNumber=0; };
+	}
+}
+
+
+
+void displayDigitOnNextDisplay(uint8_t x)
+{
+	uint16_t d1, d2, d3; // trzy wyswietlacze które nalezy zgasic
+	uint16_t d0;         // wyswietlacz, ktory nalezy zapalic
+	
+	GPIO_Write(GPIOB, intTo7seg(digitNumber)); // zapal segmenty wyswietlacza
+	
+	switch(x)
+	{
+		case 0: d0 = GPIO_Pin_11;
+				d1 = GPIO_Pin_8;
+				d2 = GPIO_Pin_9;
+				d3 = GPIO_Pin_10;
+				break;
+		
+		case 1: d0 = GPIO_Pin_10;
+				d1 = GPIO_Pin_8;
+				d2 = GPIO_Pin_9;
+				d3 = GPIO_Pin_11;
+				break;
+		
+		case 2: d0 = GPIO_Pin_9;
+				d1 = GPIO_Pin_8;
+				d2 = GPIO_Pin_10;
+				d3 = GPIO_Pin_11;
+				break;
+		
+		case 3: d0 = GPIO_Pin_8;
+				d1 = GPIO_Pin_9;
+				d2 = GPIO_Pin_10;
+				d3 = GPIO_Pin_11;
+				break;
+	}
+	
+	GPIO_ResetBits(GPIOB, d0); // wlacz wyswietlacz DS3
+	GPIO_SetBits(GPIOB,  d1 |  d2 | d3); // wylacz pozostale
+}
+
+
+// konwersja na kod wyswietlacza 7-segmentowego
+uint16_t intTo7seg(uint8_t cyfra)
+{
+	uint16_t result;
+	switch (cyfra)
+	{
+		case 0:  result=0xC0; break; // 11000000 0
+		case 1:  result=0xF9; break; // 11111001 1
+		case 2:  result=0xA4; break; // 10100100 2
+		case 3:  result=0xB0; break; // 10110000 3
+		case 4:  result=0x99; break; // 10011011 4
+		case 5:  result=0x92; break; // 10010010 5
+		case 6:  result=0x82; break; // 10000010 6 
+		case 7:  result=0xF8; break; // 11111000 7
+		case 8:  result=0x80; break; // 10000000 8
+		case 9:  result=0x90; break; // 10010000 9
+		case 10: result=0x88; break; // 10001000 a
+		case 11: result=0x83; break; // 10000011 b
+		case 12: result=0xC6; break; // 11000110 c
+		case 13: result=0xA1; break; // 10100001 d
+		case 14: result=0x86; break; // 10000110 e
+		case 15: result=0x8E; break; // 10001110 f
+		default: result=0xFF; break; // 11111111 - nic do wyswietlenia
+	}
+	
+	return result;		
+}
+	
+
+
+void Delay (uint32_t ms) // nasza funkcja opóznienia wykorzystujaca timer SysTick
+{
+	if (SysTick_Config(SysTick_Frequency / 1000 * ms))
+	{ 
+		while(1);
+	}
+	SysTick_CLKSourceConfig(SysTick_CLKSource_HCLK_Div8);
+}
+
+
+	
 void RCC_Config(void)
 //konfigurowanie sygnalow taktujacych
 {

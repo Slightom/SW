@@ -4,7 +4,7 @@
 
 
 
-CO to jest 8 hobbitów?
+Czemu Napoleon zjechal winda w dól?
 ..
 ..
 ..
@@ -38,4 +38,4 @@ CO to jest 8 hobbitów?
 ..
 ..
 ..
-Hobbajt!
+Bo Naparter!
