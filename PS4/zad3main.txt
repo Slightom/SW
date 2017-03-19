@@ -1,0 +1,225 @@
+#include "stm32f10x.h"
+#include "stdbool.h"
+#define SysTick_Frequency 9000000
+ 
+void GPIO_Config(void);
+void RCC_Config(void);
+uint16_t intTo7seg(uint8_t, bool dot);      // konwersja na kod wyswietlacza 7-segmentowego
+void Delay (uint32_t ms);                   // powoduje wywolywanie przerwania z czestotliwoscia okreslona w parametrze
+void step(void);                            // wykonuje sie w kazdym przerwaniu
+void displayDigitOnNextDisplay(uint8_t x);  // wyswietla cyfre na jednym wyswietlaczu, pozostale gasi
+void Stoper(void);													// logika stopera
+uint8_t  displayNumber = 0;           // numer wyswietlacza ktory ma byc aktualnie zapalony 0..3
+uint32_t interruptCounter = 0;        // zlicza przerwania 0..changeDigitTime/interruptTime
+uint8_t  digitNumber = 0;             // numer wyswietlanej cyfry 0..15
+uint32_t changeDigitTime = 99;      	// co ile ms ma zmienic sie wyswietlana cyfra
+uint32_t interruptfrequency = 1;      // co ile ms ma sie wywolac przerwanie
+
+bool isStoper = false;								//czy stoper jest aktywny
+uint8_t m=0;  //minuty
+uint8_t s1=0; //dziesiatki sekund
+uint8_t s2=0; //jednosci sekund
+uint8_t c=0;	 //milisekundy
+uint8_t button_state=0xFF, temp=0, port_data ; //do obslugi przycisków
+
+int main(void)
+{  
+    //konfiguracja systemu
+    RCC_Config();  
+    GPIO_Config();
+ 
+    Delay(interruptfrequency);
+   
+    while (1)
+    {
+    };
+}
+
+
+
+void step()
+{	
+		// standardowy sposób na odczytanie wcisniecia przycisków
+		port_data = GPIO_ReadInputData(GPIOA);// czytaj port GPIOA
+		temp = port_data ^ button_state; 			// czy stan przycisków sie zmienil?
+		temp &= button_state; 								// czy to byla zmiana z 1 na 0?
+		button_state = port_data; 						// zapamietaj nowy stan
+		if (temp & 0x01){				// jesli wcisniety 1 przycisk, to pauza/kontynuacja zliczania stopera
+				isStoper = !isStoper;
+		}
+		if (temp & 0x02){				// jesli wcisniety 2 przycisk, to zatrzymaj stoper i wyzeruj wartosci
+				isStoper = false;
+				c=0;
+				s1=0;
+				s2=0;
+				m=0;
+		}
+	
+		displayDigitOnNextDisplay(displayNumber++);
+		if(displayNumber == 4) { displayNumber=0; };
+		if(interruptCounter++ == changeDigitTime)
+		{
+				interruptCounter = 0;
+				if(isStoper) 				// jesli stoper jest aktywny to dodanie kolejnych 100 milisekund do odmierzonego czasu
+				{
+						Stoper();
+				}
+		}
+}
+
+
+
+void displayDigitOnNextDisplay(uint8_t x)
+{
+	uint16_t d1, d2, d3; // trzy wyswietlacze które nalezy zgasic
+	uint16_t d0;         // wyswietlacz, ktory nalezy zapalic
+
+	switch(x)
+	{
+		case 0:	GPIO_Write(GPIOB, intTo7seg(m, true)); // zapal minuty z kropka
+						d0 = GPIO_Pin_11;
+						d1 = GPIO_Pin_8;
+						d2 = GPIO_Pin_9;
+						d3 = GPIO_Pin_10;
+						break;	
+		case 1: GPIO_Write(GPIOB, intTo7seg(s2, false)); // zapal 'dziesiatki' sekund bez kropki
+						d0 = GPIO_Pin_10;
+						d1 = GPIO_Pin_8;
+						d2 = GPIO_Pin_9;
+						d3 = GPIO_Pin_11;
+						break;	
+		case 2: GPIO_Write(GPIOB, intTo7seg(s1, true)); // zapal 'jednosci' sekund z kropka
+						d0 = GPIO_Pin_9;
+						d1 = GPIO_Pin_8;
+						d2 = GPIO_Pin_10;
+						d3 = GPIO_Pin_11;
+						break;	
+		case 3: GPIO_Write(GPIOB, intTo7seg(c, false)); // zapal milisekundy bez kropki
+						d0 = GPIO_Pin_8;
+						d1 = GPIO_Pin_9;
+						d2 = GPIO_Pin_10;
+						d3 = GPIO_Pin_11;
+						break;
+	}
+	GPIO_ResetBits(GPIOB, d0); // wlacz wyswietlacz DS3
+	GPIO_SetBits(GPIOB,  d1 |  d2 | d3); // wylacz pozostale
+}
+
+void Stoper(void)
+{
+	//prosta implementacja stopera - funkcja stoper jest wywolywana do 100 milisekund
+	if(++c > 9) // dodawanie co 100 milisekund od 0 do 9
+	{
+		c = 0;
+		if(++s1 > 9) // dodawanie jednosci sekund od 0 do 9
+		{
+			s1 = 0;
+			if(++s2 > 5) // dodawanie dziesiatek sekund od 0 do 5 (0 - 59)
+			{
+				s2 = 0;
+				if(++m > 9) // dodawanie minut od 0 do 9, jesli stoper zliczyl 9 minut
+										// 59 sekund 900 milisekund (9:59:9) to zacznie liczyc od zera (0:00:0)
+				{
+					c=0;
+					s1=0;
+					s2=0;
+					m=0;
+				}
+			}
+		}
+	}
+}
+
+uint16_t intTo7seg(uint8_t cyfra, bool dot)
+{
+		// zmodyfikowana funkcja konwertujaca liczby z systemu dziesietnego na system szesnastkowy
+		// z drugim parametrem typu bool:
+		// false - zwykla konwersja
+		// true  - konwesrja z dopisaniem kropi do wyswietlenia
+		uint16_t result;
+		switch (cyfra){
+				case 0:  result=0xC0; break; // 11000000 0
+				case 1:  result=0xF9; break; // 11111001 1
+				case 2:  result=0xA4; break; // 10100100 2
+				case 3:  result=0xB0; break; // 10110000 3
+				case 4:  result=0x99; break; // 10011001 4
+				case 5:  result=0x92; break; // 10010010 5
+				case 6:  result=0x82; break; // 10000010 6 
+				case 7:  result=0xF8; break; // 11111000 7
+				case 8:  result=0x80; break; // 10000000 8
+				case 9:  result=0x90; break; // 10010000 9
+				case 10: result=0x88; break; // 10001000 a
+				case 11: result=0x83; break; // 10000011 b
+				case 12: result=0xC6; break; // 11000110 c
+				case 13: result=0xA1; break; // 10100001 d
+				case 14: result=0x86; break; // 10000110 e
+				case 15: result=0x8E; break; // 10001110 f
+				default: result=0xFF; break; // 11111111 - nic do wyswietlenia
+		}
+		if(dot) result -= 128;		// jesli ma wyswietlic z kropka to ustawiamy zero na najstarszym bicie
+			
+		return result;
+}
+
+
+void Delay (uint32_t ms) // nasza funkcja opóznienia wykorzystujaca timer SysTick
+{
+		if (SysTick_Config(SysTick_Frequency / 1000 * ms))
+		{ 
+				while(1);
+		}
+		SysTick_CLKSourceConfig(SysTick_CLKSource_HCLK_Div8);
+}
+
+
+	
+void RCC_Config(void)
+{
+		//konfigurowanie sygnalow taktujacych
+		ErrorStatus HSEStartUpStatus;                          //zmienna opisujaca rezultat uruchomienia HSE
+		//
+		RCC_DeInit();                                          //Reset ustawien RCC
+		RCC_HSEConfig(RCC_HSE_ON);                             //Wlaczenie HSE
+		HSEStartUpStatus = RCC_WaitForHSEStartUp();            //Odczekaj az HSE bedzie gotowy
+		if(HSEStartUpStatus == SUCCESS)
+		{
+				FLASH_PrefetchBufferCmd(FLASH_PrefetchBuffer_Enable);//
+				FLASH_SetLatency(FLASH_Latency_2);                   //ustaw zwloke dla pamieci Flash; zaleznie od taktowania rdzenia
+				//0:<24MHz; 1:24~48MHz; 2:>48MHz
+				RCC_HCLKConfig(RCC_SYSCLK_Div1);                     //ustaw HCLK=SYSCLK
+				RCC_PCLK2Config(RCC_HCLK_Div1);                      //ustaw PCLK2=HCLK
+				RCC_PCLK1Config(RCC_HCLK_Div2);                      //ustaw PCLK1=HCLK/2
+				RCC_PLLConfig(RCC_PLLSource_HSE_Div1, RCC_PLLMul_9); //ustaw PLLCLK = HSE*9 czyli 8MHz * 9 = 72 MHz
+				RCC_PLLCmd(ENABLE);                                  //wlacz PLL
+				while(RCC_GetFlagStatus(RCC_FLAG_PLLRDY) == RESET);  //odczekaj na poprawne uruchomienie PLL
+				RCC_SYSCLKConfig(RCC_SYSCLKSource_PLLCLK);           //ustaw PLL jako zrodlo sygnalu zegarowego
+				while(RCC_GetSYSCLKSource() != 0x08);                //odczekaj az PLL bedzie sygnalem zegarowym systemu
+				/*Tu nalezy umiescic kod zwiazany z konfiguracja sygnalow zegarowych potrzebnych w programie peryferiow*/
+				RCC_APB2PeriphClockCmd(RCC_APB2Periph_GPIOA | RCC_APB2Periph_GPIOB | RCC_APB2Periph_AFIO, ENABLE);//wlacz taktowanie portu GPIO A
+		} else {
+		} 
+}
+
+
+
+void GPIO_Config(void)
+{
+		//konfigurowanie portow GPIO
+		GPIO_InitTypeDef  GPIO_InitStructure; 
+	
+		// disable JTAG 
+		GPIO_PinRemapConfig(GPIO_Remap_SWJ_JTAGDisable, ENABLE); 
+	
+		GPIO_InitStructure.GPIO_Pin = GPIO_Pin_0 | GPIO_Pin_1 | GPIO_Pin_2 | GPIO_Pin_3 | GPIO_Pin_4 | GPIO_Pin_5 | GPIO_Pin_6 | GPIO_Pin_7;;
+		GPIO_InitStructure.GPIO_Speed = GPIO_Speed_50MHz;
+		GPIO_InitStructure.GPIO_Mode = GPIO_Mode_Out_PP;      //wyjscie push-pull
+		GPIO_Init(GPIOB, &GPIO_InitStructure);
+			
+		GPIO_InitStructure.GPIO_Pin = GPIO_Pin_8 | GPIO_Pin_9 | GPIO_Pin_10 | GPIO_Pin_11 ;
+		GPIO_InitStructure.GPIO_Speed = GPIO_Speed_50MHz;
+		GPIO_InitStructure.GPIO_Mode = GPIO_Mode_Out_OD;      //wyjscie open drain
+		GPIO_Init(GPIOB, &GPIO_InitStructure);
+}
+
+
+
